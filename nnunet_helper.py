@@ -11,8 +11,7 @@ class nnUNetHelper:
         with torch.no_grad():  
             device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
             input_image_tensor = torch.from_numpy(input_array).unsqueeze(0).unsqueeze(0).to(device)
-            prediction_image_tensor = torch.argmax(network(input_image_tensor)[0], dim=1)
-            #print(input_image_tensor.shape, prediction_image_tensor.shape)
+            prediction_image_tensor = torch.argmax(network(input_image_tensor), dim=1)
             prediction_image = prediction_image_tensor[0,:,:].detach().cpu().numpy()
             del input_image_tensor, prediction_image_tensor
         return prediction_image

@@ -881,9 +881,6 @@ class MedicalImageExplorer:
                                 feature_maps_of_actlayer = visualizer.get_feature_maps(input_tensor=input_image_tensor,
                                                             layer_name=layer_name_norm_act) 
                             
-                            del input_image_tensor
-                                
-                            
                             for kernel_id in required_kernel_ids_list:
                                 
                                 st.write(" .. "*63) # Found this value using trial and error for my machine - it is not dynamic because for some reason streamlit does not give page width. And I was lazy to search further.
@@ -896,18 +893,25 @@ class MedicalImageExplorer:
                                     plt.plot(kernel_pw_plot, linewidth=1.0)
                                     plt.xticks(np.arange(len(kernel_pw_plot),step=2), np.arange(1, len(kernel_pw_plot)+1, step=2))
                                     plt.grid()  
-                                    plt.title(f"Original Kernel Value/Distribution \n"
+                                    plt.title(f"Original Kernel\n"
                                           f"Sum = {np.sum(kernel_pw_plot)}")
                                 else:
                                     kernel_dw_plot = network_weights[name_required_weight][kernel_id-1,0].cpu().numpy()
                                     plt.imshow(kernel_dw_plot, 
                                            cmap='viridis')
+                                    
+                                    # Add text annotations for each cell
+                                    for i in range(kernel_dw_plot.shape[0]):
+                                        for j in range(kernel_dw_plot.shape[1]):
+                                            plt.text(j, i, str(round(kernel_dw_plot[i, j],3)), 
+                                                    ha='center', va='center', fontsize = 'small',
+                                                    color='white' if kernel_dw_plot[i, j] < np.mean(kernel_dw_plot) else 'black')
                                     plt.axis("off") 
-                                    plt.title(f"Original Kernel Value/Distribution \n"
+                                    plt.title(f"Original Kernel\n"
                                           f"Sum = {np.sum(kernel_dw_plot)}")
                                     
                                 plt.subplot(1, 2, 2)
-                                plt.title("Feature map using original Kernel Value/Distribution")
+                                plt.title("Feature map using original Kernel")
                                 plt.imshow(feature_maps_of_conv_layer[0, kernel_id-1,:,:], cmap='gray')
                                 
                                 st.pyplot(plt.gcf())
@@ -929,6 +933,54 @@ class MedicalImageExplorer:
                                     
                                     st.pyplot(plt.gcf())
                                     plt.close()
+                                    
+                                ##################################################
+                                # Individual modificaiton - This is temporary
+                                ##################################################
+                                if required_weight_shape[-1] == 1:
+                                    # Individual Threshold controls
+                                    threshold_this_pw_kernel = st.checkbox(
+                                        f'Apply threshold to kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]} and show the resultant feature map', 
+                                        value=False,
+                                        help="Thresholds the values of this kernel."
+                                    )
+                                    
+                                    if threshold_this_pw_kernel:
+                                        threhold_value_str_pw_kernel = st.text_input(f"Enter the threshold value for kernel :green[#{kernel_id}]",
+                                                        "0.0")
+                                        try:
+                                            threhold_value_num_pw_kernel = float(threhold_value_str_pw_kernel)
+                                            original_pw_kernel = network_weights[name_required_weight][kernel_id-1]
+                                            modified_pw_kernel = torch.where(torch.abs(original_pw_kernel) > threhold_value_num_pw_kernel, original_pw_kernel, 0)
+                                            modified_pw_kernel_np = modified_pw_kernel.cpu().numpy().flatten()
+                                            
+                                            layer_name_corresponding_dw_conv = copy(a_layer) # Because I am being pedantic.
+                                            layer_name_corresponding_dw_conv = layer_name_corresponding_dw_conv.replace("dws_conv.1", "dws_conv.0")
+                                            feature_maps_of_corresponding_dw_conv = visualizer.get_feature_maps(input_tensor=input_image_tensor,
+                                                                            layer_name=layer_name_corresponding_dw_conv) 
+                                            
+                                            name_required_bias = str(a_layer +".bias")
+                                            feature_map_of_modified_pw_kernel = torch.nn.functional.conv2d(input=feature_maps_of_corresponding_dw_conv,
+                                                                       weight=modified_pw_kernel.unsqueeze(0),
+                                                                       bias=torch.tensor([network_weights[name_required_bias][kernel_id-1]]))                          
+                                            
+                                            plt.figure(figsize=(10, 5))
+                                            plt.subplot(1, 2, 1)
+                                            plt.plot(modified_pw_kernel_np, linewidth=1.0)
+                                            plt.xticks(np.arange(len(modified_pw_kernel_np),step=2), np.arange(1, len(modified_pw_kernel_np)+1, step=2))
+                                            plt.grid()  
+                                            plt.title(f"Modified Kernel after threshold = {threhold_value_num_pw_kernel} \n"
+                                                f"Sum = {np.sum(modified_pw_kernel_np)}")
+                                            plt.subplot(1, 2, 2)
+                                            plt.title("Feature map using modified Kernel")
+                                            plt.imshow(feature_map_of_modified_pw_kernel[0, 0,:,:], cmap='gray')
+                                            
+                                            st.pyplot(plt.gcf())
+                                            plt.close()
+                                        
+                                        except:
+                                            st.write(f"The current threshold value is invalid. Please enter a number and re-try, or disable ***threshold*** for this kernel.",)
+                                            
 
                         st.divider()  # 👈 Draws a horizontal rule                
 
