@@ -7,7 +7,7 @@
 # DO THIS AT YOUR OWN PERIL. 
 
 import streamlit as st
-import torch
+import torch, math
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -293,7 +293,8 @@ class AdvancedCNNVisualizer:
                                   figsize: Tuple =(12, 12),
                                   fontsize: int =8,
                                   apply_threshold: bool = False,
-                                  threshold_value: float = 0.0 ) -> Tuple[plt.Figure, dict]:
+                                  threshold_value: float = 0.0,
+                                  xticks_step:int = 1) -> Tuple[plt.Figure, dict]:
         """
         Advanced kernel visualization with detailed analysis
         
@@ -315,10 +316,9 @@ class AdvancedCNNVisualizer:
         kernels_shape = kernels.shape
         
         n_kernels = kernels_shape[0]
-        n_columns = num_columns
-        grid_size = int(np.ceil(n_kernels/n_columns))
+        grid_size = int(np.ceil(n_kernels/num_columns))
         
-        fig, axes = plt.subplots(grid_size, n_columns, figsize=figsize)
+        fig, axes = plt.subplots(grid_size, num_columns, figsize=figsize)
         axes = axes.ravel() if grid_size > 1 else [axes]
         
         # Kernel statistics
@@ -349,7 +349,7 @@ class AdvancedCNNVisualizer:
             kernel_stats['kernel_details'].append(kernel_info)
             
             axes[i].plot(kernel, linewidth=1.0)
-            axes[i].set_xticks(np.arange(len(kernel), step=n_columns), np.arange(1, len(kernel)+1, step=n_columns))
+            axes[i].set_xticks(np.arange(len(kernel), step=xticks_step), np.arange(1, len(kernel)+1, step=xticks_step))
             axes[i].grid()   
             #axes[i].axis('off')
             
@@ -675,7 +675,7 @@ class MedicalImageExplorer:
                         num_layer_kernels =required_weight_shape[0]
                         
                         st.markdown(f"""
-                        #### Displaying kernels of layer: {layer_mapping_dict[a_layer]}
+                        #### Displaying kernels of layer :red[{layer_mapping_dict[a_layer]}]
                         This layer has :blue-background[{num_layer_kernels}] kernels. 
                         You can choose to display :orange[all], and/or enter below your desired kernel ID.
                         """)
@@ -727,13 +727,26 @@ class MedicalImageExplorer:
                                             help="Scales kernel values to a consistent range for better comparison"
                                         )
                                         
+                                        xticks_step_full_plot_str = st.text_input(f"Enter the number (positive integer) of steps between x-ticks for {layer_mapping_dict[a_layer]}.", 
+                                                            "1")
+                                        
+                                        try:
+                                            xticks_step_full_plot_int = int(xticks_step_full_plot_str)
+                                            if xticks_step_full_plot_int < 1 or xticks_step_full_plot_int > required_weight_shape[1]:
+                                                st.write(f"The current steps value is invalid and we will use a step-size of 1. Please enter a positive integer value between 1-{required_weight_shape[1]}.",)
+                                                xticks_step_full_plot_int = 1
+                                        except:
+                                            st.write(f"The current steps value is invalid and we will use a step-size of 1. Please enter a positive integer value between 1-{required_weight_shape[1]}.",)
+                                            xticks_step_full_plot_int = 1
+                                        
                                     # Generate kernel visualization
                                     kernel_fig, kernel_stats = visualizer.advanced_kernel_analysis_1d(
                                         layer_name=a_layer, 
                                         normalize=normalize_kernels,
                                         num_columns=layer_plot_columns,
                                         figsize=layer_figsize,
-                                        fontsize=layer_plot_font
+                                        fontsize=layer_plot_font,
+                                        xticks_step=xticks_step_full_plot_int
                                     )
                                      
                                     
@@ -856,15 +869,21 @@ class MedicalImageExplorer:
                         elif required_kernel_ids_list is not None and input_image is not None:
                             if "dws_conv.0" in a_layer or "seg_layers" in a_layer:
                                 apply_norm_and_act = False
+                                separate_norm_and_act = "No"
                                 feature_maps_of_actlayer = None
                                 st.write(f"There are no normalization or activation layers immediately after this layer.")
                             else:
-                                # Threshold controls
+                                # Normalization and Activation controls
                                 apply_norm_and_act = st.checkbox(
                                     f'Show feature maps after applying normalization and activation for selected kernels of layer: {layer_mapping_dict[a_layer]}', 
                                     value=False,
                                     help="Applies normalization and activation on the convolution output."
                                 )
+                                
+                                if apply_norm_and_act:
+                                    separate_norm_and_act = st.radio(f"Display individual feature maps of normalization and activation for selected kernels of layer: {layer_mapping_dict[a_layer]}. Just a heads up, feature map after normalization will appear same as the one after convolution.", 
+                                                                ["No", "Yes"]
+                                                                )
                             
                             device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
                             input_image_tensor = torch.from_numpy(input_image).unsqueeze(0).unsqueeze(0).to(device)
@@ -872,15 +891,38 @@ class MedicalImageExplorer:
                                                         layer_name=a_layer)                            
                             
                             if apply_norm_and_act:
-                                layer_name_norm_act = copy(a_layer) # Because I am being pedantic.
-                                if a_layer == "encoder.stages.0.0.conv":
-                                    layer_name_norm_act = layer_name_norm_act.replace("conv", "nonlin")
-                                else:
-                                    layer_name_norm_act = layer_name_norm_act.replace("dws_conv.1", "nonlin")
+                                layer_name_act = copy(a_layer) # Because I am being pedantic.
+                                layer_name_norm = copy(a_layer) # And also sleep deprived.
+                                
+                                layer_name_act = layer_name_act.replace("conv", "nonlin") if a_layer == "encoder.stages.0.0.conv" else layer_name_act.replace("dws_conv.1", "nonlin")
+                                layer_name_norm = layer_name_norm.replace("conv", "norm") if a_layer == "encoder.stages.0.0.conv" else layer_name_norm.replace("dws_conv.1", "norm")
                                 
                                 feature_maps_of_actlayer = visualizer.get_feature_maps(input_tensor=input_image_tensor,
-                                                            layer_name=layer_name_norm_act) 
-                            
+                                                            layer_name=layer_name_act) 
+                                
+                                imageFilePath_NormAct = "helpers/images/Norm_plus_activation.png" 
+                                image_NormAct = np.array(Image.open(imageFilePath_NormAct), dtype=np.uint8)
+
+                                if separate_norm_and_act == "Yes":                                
+                                    #feature_maps_of_normlayer = visualizer.get_feature_maps(input_tensor=input_image_tensor,
+                                    #                            layer_name=layer_name_norm)
+                                    
+                                    # Why am I manually doing normalization you ask? 
+                                    # Well activation was done 'inplace', so both output norm and leakyrelu give the same answer.
+                                    layer_norm_weight_original_kernel = network_weights[f"{layer_name_norm}.weight"]
+                                    layer_norm_bias_original_kernel = network_weights[f"{layer_name_norm}.bias"]
+
+                                    feature_maps_of_normlayer = torch.nn.functional.instance_norm(input=feature_maps_of_conv_layer,
+                                                                                                weight=layer_norm_weight_original_kernel,
+                                                                                                bias=layer_norm_bias_original_kernel) 
+                                    
+                                    imageFilePath_Norm = "helpers/images/Normalization.png" 
+                                    image_Norm = np.array(Image.open(imageFilePath_Norm), dtype=np.uint8)
+                                    
+                                    imageFilePath_Act = "helpers/images/Activation.png" 
+                                    image_Act = np.array(Image.open(imageFilePath_Act), dtype=np.uint8)
+                                    
+                                    
                             for kernel_id in required_kernel_ids_list:
                                 
                                 st.write(" .. "*63) # Found this value using trial and error for my machine - it is not dynamic because for some reason streamlit does not give page width. And I was lazy to search further.
@@ -891,7 +933,8 @@ class MedicalImageExplorer:
                                 if required_weight_shape[-1] == 1:
                                     kernel_pw_plot = network_weights[name_required_weight][kernel_id-1].cpu().numpy().flatten()                        
                                     plt.plot(kernel_pw_plot, linewidth=1.0)
-                                    plt.xticks(np.arange(len(kernel_pw_plot),step=2), np.arange(1, len(kernel_pw_plot)+1, step=2))
+                                    xticks_step = math.ceil(kernel_pw_plot.shape[0]/16) # Why 16? Because 16 ticks fit in the plot. Deal with it!
+                                    plt.xticks(np.arange(len(kernel_pw_plot),step=xticks_step), np.arange(1, len(kernel_pw_plot)+1, step=xticks_step))  
                                     plt.grid()  
                                     plt.title(f"Original Kernel\n"
                                           f"Sum = {np.sum(kernel_pw_plot)}")
@@ -917,20 +960,40 @@ class MedicalImageExplorer:
                                 st.pyplot(plt.gcf())
                                 plt.close()
                                 
-                                if apply_norm_and_act and feature_maps_of_actlayer is not None:   
+                                if apply_norm_and_act and feature_maps_of_actlayer is not None and separate_norm_and_act == "No":   
                                     plt.figure(figsize=(10, 5))
-                                    
                                     plt.subplot(1, 2, 1)
                                     plt.title("Normalization and Activation")
-                                    imageFileName = "helpers/images/Norm_plus_activation.png" 
-                                    imageFileNormAct = np.array(Image.open(imageFileName), dtype=np.uint8)
-                                    plt.imshow(imageFileNormAct)
-                                    plt.axis("off") 
-                                        
+                                    plt.imshow(image_NormAct)
+                                    plt.axis("off")
                                     plt.subplot(1, 2, 2)
                                     plt.title("Feature map after applying Normalization and Activation")
                                     plt.imshow(feature_maps_of_actlayer[0, kernel_id-1,:,:], cmap='gray')
+                                    st.pyplot(plt.gcf())
+                                    plt.close()
                                     
+                                elif apply_norm_and_act and feature_maps_of_actlayer is not None and separate_norm_and_act == "Yes":   
+                                    ## Only normalization and its feature maps.
+                                    plt.figure(figsize=(10, 5))
+                                    plt.subplot(1, 2, 1)
+                                    plt.title("Normalization after convolution")
+                                    plt.imshow(image_Norm)
+                                    plt.axis("off") 
+                                    plt.subplot(1, 2, 2)
+                                    plt.title("Feature map after applying Normalization")
+                                    plt.imshow(feature_maps_of_normlayer[0, kernel_id-1,:,:], cmap='gray')
+                                    st.pyplot(plt.gcf())
+                                    plt.close()
+                                    
+                                    ## Only activation and its feature maps.
+                                    plt.figure(figsize=(10, 5))
+                                    plt.subplot(1, 2, 1)
+                                    plt.title("Activation after Normalization")
+                                    plt.imshow(image_Act)
+                                    plt.axis("off") 
+                                    plt.subplot(1, 2, 2)
+                                    plt.title("Feature map after applying Activation")
+                                    plt.imshow(feature_maps_of_actlayer[0, kernel_id-1,:,:], cmap='gray')
                                     st.pyplot(plt.gcf())
                                     plt.close()
                                     
@@ -940,48 +1003,101 @@ class MedicalImageExplorer:
                                 if required_weight_shape[-1] == 1:
                                     # Individual Threshold controls
                                     threshold_this_pw_kernel = st.checkbox(
-                                        f'Apply threshold to kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]} and show the resultant feature map', 
+                                        f'Apply threshold to kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}', 
                                         value=False,
                                         help="Thresholds the values of this kernel."
                                     )
                                     
                                     if threshold_this_pw_kernel:
-                                        threhold_value_str_pw_kernel = st.text_input(f"Enter the threshold value for kernel :green[#{kernel_id}]",
+                                        threhold_value_str_pw_kernel = st.text_input(f"Enter the threshold value for kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}",
                                                         "0.0")
                                         try:
                                             threhold_value_num_pw_kernel = float(threhold_value_str_pw_kernel)
-                                            original_pw_kernel = network_weights[name_required_weight][kernel_id-1]
-                                            modified_pw_kernel = torch.where(torch.abs(original_pw_kernel) > threhold_value_num_pw_kernel, original_pw_kernel, 0)
-                                            modified_pw_kernel_np = modified_pw_kernel.cpu().numpy().flatten()
-                                            
-                                            layer_name_corresponding_dw_conv = copy(a_layer) # Because I am being pedantic.
-                                            layer_name_corresponding_dw_conv = layer_name_corresponding_dw_conv.replace("dws_conv.1", "dws_conv.0")
-                                            feature_maps_of_corresponding_dw_conv = visualizer.get_feature_maps(input_tensor=input_image_tensor,
-                                                                            layer_name=layer_name_corresponding_dw_conv) 
-                                            
-                                            name_required_bias = str(a_layer +".bias")
-                                            feature_map_of_modified_pw_kernel = torch.nn.functional.conv2d(input=feature_maps_of_corresponding_dw_conv,
-                                                                       weight=modified_pw_kernel.unsqueeze(0),
-                                                                       bias=torch.tensor([network_weights[name_required_bias][kernel_id-1]]))                          
-                                            
-                                            plt.figure(figsize=(10, 5))
-                                            plt.subplot(1, 2, 1)
-                                            plt.plot(modified_pw_kernel_np, linewidth=1.0)
-                                            plt.xticks(np.arange(len(modified_pw_kernel_np),step=2), np.arange(1, len(modified_pw_kernel_np)+1, step=2))
-                                            plt.grid()  
-                                            plt.title(f"Modified Kernel after threshold = {threhold_value_num_pw_kernel} \n"
-                                                f"Sum = {np.sum(modified_pw_kernel_np)}")
-                                            plt.subplot(1, 2, 2)
-                                            plt.title("Feature map using modified Kernel")
-                                            plt.imshow(feature_map_of_modified_pw_kernel[0, 0,:,:], cmap='gray')
-                                            
-                                            st.pyplot(plt.gcf())
-                                            plt.close()
-                                        
+
                                         except:
                                             st.write(f"The current threshold value is invalid. Please enter a number and re-try, or disable ***threshold*** for this kernel.",)
+                                            threhold_value_num_pw_kernel = 0.0
+                                        
+                                        original_pw_kernel = network_weights[name_required_weight][kernel_id-1]
+                                        modified_pw_kernel = torch.where(torch.abs(original_pw_kernel) > threhold_value_num_pw_kernel, original_pw_kernel, 0)
+                                        modified_pw_kernel_np = modified_pw_kernel.cpu().numpy().flatten()
+                                        
+                                        layer_name_corresponding_dw_conv = copy(a_layer) # Because I am being pedantic.
+                                        layer_name_corresponding_dw_conv = layer_name_corresponding_dw_conv.replace("dws_conv.1", "dws_conv.0")
+                                        feature_maps_of_corresponding_dw_conv = visualizer.get_feature_maps(input_tensor=input_image_tensor,
+                                                                        layer_name=layer_name_corresponding_dw_conv) 
+                                        
+                                        name_required_bias = str(a_layer +".bias")
+                                        feature_map_of_modified_pw_kernel = torch.nn.functional.conv2d(input=feature_maps_of_corresponding_dw_conv,
+                                                                    weight=modified_pw_kernel.unsqueeze(0),
+                                                                    bias=torch.tensor([network_weights[name_required_bias][kernel_id-1]]))                          
+                                        
+                                        plt.figure(figsize=(10, 5))
+                                        plt.subplot(1, 2, 1)
+                                        plt.plot(modified_pw_kernel_np, linewidth=1.0)
+                                        xticks_step = math.ceil(kernel_pw_plot.shape[0]/16) # Why 16? Because 16 ticks fit in the plot. Deal with it!
+                                        plt.xticks(np.arange(len(modified_pw_kernel_np),step=xticks_step), np.arange(1, len(modified_pw_kernel_np)+1, step=xticks_step))
+                                        plt.grid()  
+                                        plt.title(f"Modified Kernel after threshold = {threhold_value_num_pw_kernel} \n"
+                                            f"Sum = {np.sum(modified_pw_kernel_np)}")
+                                        plt.subplot(1, 2, 2)
+                                        plt.title("Feature map using modified Kernel")
+                                        plt.imshow(feature_map_of_modified_pw_kernel[0, 0,:,:], cmap='gray')
+                                        
+                                        st.pyplot(plt.gcf())
+                                        plt.close()    
+                                        
+                                        if apply_norm_and_act and feature_map_of_modified_pw_kernel is not None:
                                             
+                                            layer_norm_weight_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.weight"][kernel_id-1]])
+                                            layer_norm_bias_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.bias"][kernel_id-1]])
 
+                                            feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel,
+                                                                                                                                weight=layer_norm_weight_after_modified_kernel,
+                                                                                                                                bias=layer_norm_bias_after_modified_kernel)
+                                            feature_maps_of_actlayer_after_modified_kernel = torch.nn.functional.leaky_relu(input=feature_maps_of_normlayer_after_modified_kernel)
+                                            
+                                            if separate_norm_and_act == "No":   
+                                                
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization and Activation")
+                                                plt.imshow(image_NormAct)
+                                                plt.axis("off")
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization and Activation")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                            elif separate_norm_and_act == "Yes":   
+                                                
+                                                ## Only normalization and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization after convolution")
+                                                plt.imshow(image_Norm)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization")
+                                                plt.imshow(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                                ## Only activation and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Activation after Normalization")
+                                                plt.imshow(image_Act)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Activation")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                            
+                            
+                                        
                         st.divider()  # 👈 Draws a horizontal rule                
 
 def main():
