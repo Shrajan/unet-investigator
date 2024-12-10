@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple, Union, Dict
 from matplotlib.colors import LinearSegmentedColormap
 from copy import copy
 from PIL import Image
+from matplotlib import cm
 
 # Assuming you have these utility functions in separate files
 from nnunet_helper import nnUNetHelper
@@ -241,6 +242,42 @@ def load_medical_image(uploaded_file: Union[str, np.ndarray, None],
         st.error(f"Error processing image: {e}")
         return None, None, None
 
+
+def plot_filter_3d(filter_2d):
+    """
+    Visualize a 2D filter in 3D representation
+    
+    Parameters:
+    filter_2d (numpy.ndarray): 2D filter/kernel to visualize
+    """
+    # Create coordinate grids
+    x = np.arange(filter_2d.shape[1])
+    y = np.arange(filter_2d.shape[0])
+    X, Y = np.meshgrid(x, y)
+    
+    # Create the 3D plot
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Surface plot
+    surf = ax.plot_surface(X, Y, filter_2d, 
+                            #cmap=cm.coolwarm,  # Color map 
+                            cmap = "viridis",
+                            linewidth=0, 
+                            antialiased=False)
+    
+    # Customize the plot
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    ax.set_zlabel('Filter Value')
+    ax.set_title('3D Visualization of 2D Filter')
+    
+    # Add a color bar
+    fig.colorbar(surf, shrink=0.5, aspect=5)
+    
+    plt.tight_layout()
+    st.pyplot(plt.gcf())
+    plt.close()
 
 class AdvancedCNNVisualizer:
     def __init__(self, model):
@@ -650,14 +687,22 @@ class MedicalImageExplorer:
                 visualizer = AdvancedCNNVisualizer(network)
                 
                 # Layer and visualization mode selection
-                available_layers = [
+                all_conv_layers = [
                     name for name, module in network.named_modules() 
                     if isinstance(module, torch.nn.Conv2d)
                 ]
-                layer_mapping_dict = get_user_friendly_names(actual_layer_names=available_layers, 
+                required_layers = copy(all_conv_layers)
+                # Remove the deep supervision layers, except final prediction layer.
+                for a_conv_layer_name in all_conv_layers:
+                    if 'seg_layers' in a_conv_layer_name:
+                        str_split_list = a_conv_layer_name.split(".")
+                        if str_split_list[-1] != str(network_init_kwargs["n_stages"]-2):
+                            required_layers.remove(a_conv_layer_name)
+                
+                layer_mapping_dict = get_user_friendly_names(actual_layer_names=required_layers, 
                                                              num_unet_stages=network_init_kwargs["n_stages"])
                 
-                for idx, a_layer in enumerate(available_layers):
+                for idx, a_layer in enumerate(required_layers):
                     
                     # Kernel analysis controls
                     layer_selection_button = st.sidebar.checkbox(
@@ -826,7 +871,7 @@ class MedicalImageExplorer:
                                             
                         
                         st.write(" . "*98) # Found this value using trial and error for my machine - it is not dynamic because for some reason streamlit does not give page width. And I was lazy to search further.
-                        required_kernel_ids = st.text_input(f"Enter the required kernel ID for: {layer_mapping_dict[a_layer]}. If you want to display multiple kernels, please separate ID values with commas (example: ***3*** or ***1,2,4*** or ***4,8,12*** or ***all*** or ***none***).", 
+                        required_kernel_ids = st.text_input(f"Enter the required kernel ID for: {layer_mapping_dict[a_layer]}. If you want to display multiple kernels, please separate ID values with commas (example: ***3*** or ***1,2,3*** or ***4,8,12*** or ***10-15*** or ***9,16-20*** or ***4-8,16-20*** or ***all*** or ***none***).", 
                                                             "none")      
                         
                         # To save some hassle.
@@ -837,14 +882,39 @@ class MedicalImageExplorer:
                             elif required_kernel_ids.lower() == "all":
                                 required_kernel_ids_list = [x for x in range(1,num_layer_kernels+1)]
                                 st.write(f"All kernels are selected, and their attributes will be displayed individually below.")  
+                            elif "-" in required_kernel_ids and "," in required_kernel_ids:
+                                required_kernel_ids_list = []
+                                comma_split_list = required_kernel_ids.split(",")
+                                for list_val in comma_split_list:
+                                    if "-" in list_val:
+                                        hypen_split_list = list_val.split("-")
+                                        if len(hypen_split_list) == 2:
+                                            required_kernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
+                                        else:
+                                            st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
+                                            required_kernel_ids_list = None
+                                            break
+                                    else:
+                                        required_kernel_ids_list.append(int(list_val))
+                                    
+                            elif "-" in required_kernel_ids and "," not in required_kernel_ids:
+                                required_kernel_ids_list=[]
+                                hypen_split_list = required_kernel_ids.split("-")
+                                if len(hypen_split_list) == 2:
+                                    required_kernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
+                                else:
+                                    st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
+                                    required_kernel_ids_list = None
+                                    break
                             else:
                                 required_kernel_ids_list = [int(x) for x in required_kernel_ids.split(",")]
-                                if any( x < 1 or x > num_layer_kernels for x in required_kernel_ids_list):
-                                    st.write(f"The current value is invalid. Please choose integer values between 1-{num_layer_kernels}.",)
-                                    required_kernel_ids_list = None
-                                else:  
-                                    required_kernel_ids_list = sorted(set(required_kernel_ids_list))
-                                    st.write(f"The selected kernel(s) are {required_kernel_ids_list}, and their attributes will be displayed individually below.")        
+                                
+                            if any( x < 1 or x > num_layer_kernels for x in required_kernel_ids_list):
+                                st.write(f"The current value is invalid. Please choose integer values between 1-{num_layer_kernels}.",)
+                                required_kernel_ids_list = None
+                            else:  
+                                required_kernel_ids_list = sorted(set(required_kernel_ids_list))
+                                st.write(f"The selected kernel(s) are {required_kernel_ids_list}, and their attributes will be displayed individually below.")        
                         except:
                             st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
                             required_kernel_ids_list = None
@@ -881,16 +951,26 @@ class MedicalImageExplorer:
                                 )
                                 
                                 if apply_norm_and_act:
-                                    separate_norm_and_act = st.radio(f"Display individual feature maps of normalization and activation for selected kernels of layer: {layer_mapping_dict[a_layer]}. Just a heads up, feature map after normalization will appear same as the one after convolution.", 
+                                    separate_norm_and_act = st.radio(f"Display individual feature maps of normalization and activation for selected kernels of layer: {layer_mapping_dict[a_layer]}.", 
                                                                 ["No", "Yes"]
                                                                 )
+                            
+                            if required_weight_shape[-1] != 1:
+                                # Show Nd kernels as 3D plots.
+                                show_3d_plots = st.checkbox(
+                                    f'Display 2D kernels in 3D for selected kernels of layer: {layer_mapping_dict[a_layer]}', 
+                                    value=False,
+                                    help="Plot 3D plots for the chosen 2D kernels."
+                                )
+                            else:
+                                show_3d_plots = False
                             
                             device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
                             input_image_tensor = torch.from_numpy(input_image).unsqueeze(0).unsqueeze(0).to(device)
                             feature_maps_of_conv_layer = visualizer.get_feature_maps(input_tensor=input_image_tensor,
-                                                        layer_name=a_layer)                            
+                                                        layer_name=a_layer)                         
                             
-                            if apply_norm_and_act:
+                            if apply_norm_and_act and feature_maps_of_conv_layer is not None:
                                 layer_name_act = copy(a_layer) # Because I am being pedantic.
                                 layer_name_norm = copy(a_layer) # And also sleep deprived.
                                 
@@ -908,14 +988,16 @@ class MedicalImageExplorer:
                                     #                            layer_name=layer_name_norm)
                                     
                                     # Why am I manually doing normalization you ask? 
-                                    # Well activation was done 'inplace', so both output norm and leakyrelu give the same answer.
-                                    layer_norm_weight_original_kernel = network_weights[f"{layer_name_norm}.weight"]
-                                    layer_norm_bias_original_kernel = network_weights[f"{layer_name_norm}.bias"]
-
-                                    feature_maps_of_normlayer = torch.nn.functional.instance_norm(input=feature_maps_of_conv_layer,
+                                    # Well activation was done 'inplace', so both output norm and leakyrelu give the same answer. 
+                                    try:
+                                        layer_norm_weight_original_kernel = network_weights[f"{layer_name_norm}.weight"]
+                                        layer_norm_bias_original_kernel = network_weights[f"{layer_name_norm}.bias"]
+                                        feature_maps_of_normlayer = torch.nn.functional.instance_norm(input=feature_maps_of_conv_layer,
                                                                                                 weight=layer_norm_weight_original_kernel,
                                                                                                 bias=layer_norm_bias_original_kernel) 
-                                    
+                                    except:
+                                        feature_maps_of_normlayer = torch.nn.functional.instance_norm(input=feature_maps_of_conv_layer)
+                                        
                                     imageFilePath_Norm = "helpers/images/Normalization.png" 
                                     image_Norm = np.array(Image.open(imageFilePath_Norm), dtype=np.uint8)
                                     
@@ -937,7 +1019,7 @@ class MedicalImageExplorer:
                                     plt.xticks(np.arange(len(kernel_pw_plot),step=xticks_step), np.arange(1, len(kernel_pw_plot)+1, step=xticks_step))  
                                     plt.grid()  
                                     plt.title(f"Original Kernel\n"
-                                          f"Sum = {np.sum(kernel_pw_plot)}")
+                                          f"Sum = {np.sum(kernel_pw_plot):.3f}")
                                 else:
                                     kernel_dw_plot = network_weights[name_required_weight][kernel_id-1,0].cpu().numpy()
                                     plt.imshow(kernel_dw_plot, 
@@ -951,14 +1033,17 @@ class MedicalImageExplorer:
                                                     color='white' if kernel_dw_plot[i, j] < np.mean(kernel_dw_plot) else 'black')
                                     plt.axis("off") 
                                     plt.title(f"Original Kernel\n"
-                                          f"Sum = {np.sum(kernel_dw_plot)}")
+                                          f"Sum = {np.sum(kernel_dw_plot):.3f}")
                                     
                                 plt.subplot(1, 2, 2)
-                                plt.title("Feature map using original Kernel")
+                                plt.title("Feature map using original Kernel\n"
+                                          f"Mean = {np.mean(feature_maps_of_conv_layer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_conv_layer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}")
                                 plt.imshow(feature_maps_of_conv_layer[0, kernel_id-1,:,:], cmap='gray')
-                                
                                 st.pyplot(plt.gcf())
                                 plt.close()
+                                
+                                if show_3d_plots:
+                                    plot_filter_3d(filter_2d=kernel_dw_plot)
                                 
                                 if apply_norm_and_act and feature_maps_of_actlayer is not None and separate_norm_and_act == "No":   
                                     plt.figure(figsize=(10, 5))
@@ -967,7 +1052,8 @@ class MedicalImageExplorer:
                                     plt.imshow(image_NormAct)
                                     plt.axis("off")
                                     plt.subplot(1, 2, 2)
-                                    plt.title("Feature map after applying Normalization and Activation")
+                                    plt.title("Feature map after applying Normalization and Activation\n"
+                                                f"Mean = {np.mean(feature_maps_of_actlayer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}")
                                     plt.imshow(feature_maps_of_actlayer[0, kernel_id-1,:,:], cmap='gray')
                                     st.pyplot(plt.gcf())
                                     plt.close()
@@ -980,7 +1066,8 @@ class MedicalImageExplorer:
                                     plt.imshow(image_Norm)
                                     plt.axis("off") 
                                     plt.subplot(1, 2, 2)
-                                    plt.title("Feature map after applying Normalization")
+                                    plt.title("Feature map after applying Normalization\n"
+                                                f"Mean = {np.mean(feature_maps_of_normlayer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_normlayer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}")
                                     plt.imshow(feature_maps_of_normlayer[0, kernel_id-1,:,:], cmap='gray')
                                     st.pyplot(plt.gcf())
                                     plt.close()
@@ -992,7 +1079,8 @@ class MedicalImageExplorer:
                                     plt.imshow(image_Act)
                                     plt.axis("off") 
                                     plt.subplot(1, 2, 2)
-                                    plt.title("Feature map after applying Activation")
+                                    plt.title("Feature map after applying Activation\n"
+                                                f"Mean = {np.mean(feature_maps_of_actlayer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer[0, kernel_id-1,:,:].detach().cpu().numpy()):.3f}")
                                     plt.imshow(feature_maps_of_actlayer[0, kernel_id-1,:,:], cmap='gray')
                                     st.pyplot(plt.gcf())
                                     plt.close()
@@ -1039,9 +1127,10 @@ class MedicalImageExplorer:
                                         plt.xticks(np.arange(len(modified_pw_kernel_np),step=xticks_step), np.arange(1, len(modified_pw_kernel_np)+1, step=xticks_step))
                                         plt.grid()  
                                         plt.title(f"Modified Kernel after threshold = {threhold_value_num_pw_kernel} \n"
-                                            f"Sum = {np.sum(modified_pw_kernel_np)}")
+                                            f"Sum = {np.sum(modified_pw_kernel_np):.3f}")
                                         plt.subplot(1, 2, 2)
-                                        plt.title("Feature map using modified Kernel")
+                                        plt.title("Feature map using modified Kernel\n"
+                                                    f"Mean = {np.mean(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
                                         plt.imshow(feature_map_of_modified_pw_kernel[0, 0,:,:], cmap='gray')
                                         
                                         st.pyplot(plt.gcf())
@@ -1049,12 +1138,15 @@ class MedicalImageExplorer:
                                         
                                         if apply_norm_and_act and feature_map_of_modified_pw_kernel is not None:
                                             
-                                            layer_norm_weight_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.weight"][kernel_id-1]])
-                                            layer_norm_bias_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.bias"][kernel_id-1]])
-
-                                            feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel,
+                                            try:
+                                                layer_norm_weight_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.weight"][kernel_id-1]])
+                                                layer_norm_bias_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.bias"][kernel_id-1]])
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel,
                                                                                                                                 weight=layer_norm_weight_after_modified_kernel,
                                                                                                                                 bias=layer_norm_bias_after_modified_kernel)
+                                            except:
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel)
+                                                
                                             feature_maps_of_actlayer_after_modified_kernel = torch.nn.functional.leaky_relu(input=feature_maps_of_normlayer_after_modified_kernel)
                                             
                                             if separate_norm_and_act == "No":   
@@ -1065,7 +1157,8 @@ class MedicalImageExplorer:
                                                 plt.imshow(image_NormAct)
                                                 plt.axis("off")
                                                 plt.subplot(1, 2, 2)
-                                                plt.title("Feature map after applying Normalization and Activation")
+                                                plt.title("Feature map after applying Normalization and Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
                                                 plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
@@ -1079,7 +1172,8 @@ class MedicalImageExplorer:
                                                 plt.imshow(image_Norm)
                                                 plt.axis("off") 
                                                 plt.subplot(1, 2, 2)
-                                                plt.title("Feature map after applying Normalization")
+                                                plt.title("Feature map after applying Normalization\n"
+                                                            f"Mean = {np.mean(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
                                                 plt.imshow(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
@@ -1091,7 +1185,8 @@ class MedicalImageExplorer:
                                                 plt.imshow(image_Act)
                                                 plt.axis("off") 
                                                 plt.subplot(1, 2, 2)
-                                                plt.title("Feature map after applying Activation")
+                                                plt.title("Feature map after applying Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
                                                 plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
