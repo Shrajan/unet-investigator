@@ -18,6 +18,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from copy import copy
 from PIL import Image
 from matplotlib import cm
+import plotly.graph_objs as go
 
 # Assuming you have these utility functions in separate files
 from nnunet_helper import nnUNetHelper
@@ -278,6 +279,36 @@ def plot_filter_3d(filter_2d):
     plt.tight_layout()
     st.pyplot(plt.gcf())
     plt.close()
+
+def plot_filter_3d_plotly(filter_2d):
+    """
+    Visualize a 2D filter in an interactive 3D Plotly representation
+    Parameters:
+    filter_2d (numpy.ndarray): 2D filter/kernel to visualize
+    """
+    # We need to flip the 2d-filter 
+    filter_2d = np.flip(filter_2d, 1)
+    x = np.arange(filter_2d.shape[1])
+    y = np.arange(filter_2d.shape[0])
+    X, Y = np.meshgrid(x, y)
+
+    # Create Plotly 3D surface plot
+    fig = go.Figure(data=[go.Surface(z=filter_2d, x=X, y=Y, 
+                                     colorscale='Viridis')])
+    
+    fig.update_layout(
+        title='3D Visualization of 2D Filter',
+        scene = dict(
+            xaxis_title='X Position',
+            yaxis_title='Y Position',
+            zaxis_title='Filter Value'
+        ),
+        width=800,
+        height=600
+    )
+
+    #st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
 class AdvancedCNNVisualizer:
     def __init__(self, model):
@@ -959,7 +990,7 @@ class MedicalImageExplorer:
                             if required_weight_shape[-1] != 1:
                                 # Show Nd kernels as 3D plots.
                                 show_3d_plots = st.checkbox(
-                                    f'Display 2D kernels in 3D for selected kernels of layer: {layer_mapping_dict[a_layer]}', 
+                                    f'Display 2D kernels in 3D for selected kernels of layer: {layer_mapping_dict[a_layer]} (this is a memory intensive step, so please limit the number of kernels you wish to see).', 
                                     value=False,
                                     help="Plot 3D plots for the chosen 2D kernels."
                                 )
@@ -1044,7 +1075,7 @@ class MedicalImageExplorer:
                                 plt.close()
                                 
                                 if show_3d_plots:
-                                    plot_filter_3d(filter_2d=kernel_dw_plot)
+                                    plot_filter_3d_plotly(filter_2d=kernel_dw_plot)
                                 
                                 if apply_norm_and_act and feature_maps_of_actlayer is not None and separate_norm_and_act == "No":   
                                     plt.figure(figsize=(10, 5))
