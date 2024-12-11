@@ -879,42 +879,43 @@ class MedicalImageExplorer:
                         try:
                             if required_kernel_ids == "none":
                                 pass
-                            elif required_kernel_ids.lower() == "all":
-                                required_kernel_ids_list = [x for x in range(1,num_layer_kernels+1)]
-                                st.write(f"All kernels are selected, and their attributes will be displayed individually below.")  
-                            elif "-" in required_kernel_ids and "," in required_kernel_ids:
-                                required_kernel_ids_list = []
-                                comma_split_list = required_kernel_ids.split(",")
-                                for list_val in comma_split_list:
-                                    if "-" in list_val:
-                                        hypen_split_list = list_val.split("-")
-                                        if len(hypen_split_list) == 2:
-                                            required_kernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
-                                        else:
-                                            st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
-                                            required_kernel_ids_list = None
-                                            break
-                                    else:
-                                        required_kernel_ids_list.append(int(list_val))
-                                    
-                            elif "-" in required_kernel_ids and "," not in required_kernel_ids:
-                                required_kernel_ids_list=[]
-                                hypen_split_list = required_kernel_ids.split("-")
-                                if len(hypen_split_list) == 2:
-                                    required_kernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
-                                else:
-                                    st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
-                                    required_kernel_ids_list = None
-                                    break
                             else:
-                                required_kernel_ids_list = [int(x) for x in required_kernel_ids.split(",")]
-                                
-                            if any( x < 1 or x > num_layer_kernels for x in required_kernel_ids_list):
-                                st.write(f"The current value is invalid. Please choose integer values between 1-{num_layer_kernels}.",)
-                                required_kernel_ids_list = None
-                            else:  
-                                required_kernel_ids_list = sorted(set(required_kernel_ids_list))
-                                st.write(f"The selected kernel(s) are {required_kernel_ids_list}, and their attributes will be displayed individually below.")        
+                                if required_kernel_ids.lower() == "all":
+                                    required_kernel_ids_list = [x for x in range(1,num_layer_kernels+1)]
+                                    st.write(f"All kernels are selected, and their attributes will be displayed individually below.")  
+                                elif "-" in required_kernel_ids and "," in required_kernel_ids:
+                                    required_kernel_ids_list = []
+                                    comma_split_list = required_kernel_ids.split(",")
+                                    for list_val in comma_split_list:
+                                        if "-" in list_val:
+                                            hypen_split_list = list_val.split("-")
+                                            if len(hypen_split_list) == 2:
+                                                required_kernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
+                                            else:
+                                                st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
+                                                required_kernel_ids_list = None
+                                                break
+                                        else:
+                                            required_kernel_ids_list.append(int(list_val))
+                                        
+                                elif "-" in required_kernel_ids and "," not in required_kernel_ids:
+                                    required_kernel_ids_list=[]
+                                    hypen_split_list = required_kernel_ids.split("-")
+                                    if len(hypen_split_list) == 2:
+                                        required_kernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
+                                    else:
+                                        st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
+                                        required_kernel_ids_list = None
+                                        break
+                                else:
+                                    required_kernel_ids_list = [int(x) for x in required_kernel_ids.split(",")]
+                                    
+                                if any( x < 1 or x > num_layer_kernels for x in required_kernel_ids_list):
+                                    st.write(f"The current value is invalid. Please choose integer values between 1-{num_layer_kernels}.",)
+                                    required_kernel_ids_list = None
+                                else:  
+                                    required_kernel_ids_list = sorted(set(required_kernel_ids_list))
+                                    st.write(f"The selected kernel(s) are {required_kernel_ids_list}, and their attributes will be displayed individually below.")        
                         except:
                             st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
                             required_kernel_ids_list = None
@@ -1089,12 +1090,14 @@ class MedicalImageExplorer:
                                 # Individual modificaiton - This is temporary
                                 ##################################################
                                 if required_weight_shape[-1] == 1:
+                                    num_subkernels = network_weights[name_required_weight][kernel_id-1].shape[0]
+                                    
                                     # Individual Threshold controls
                                     threshold_this_pw_kernel = st.checkbox(
                                         f'Apply threshold to kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}', 
                                         value=False,
                                         help="Thresholds the values of this kernel."
-                                    )
+                                    ) 
                                     
                                     if threshold_this_pw_kernel:
                                         threhold_value_str_pw_kernel = st.text_input(f"Enter the threshold value for kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}",
@@ -1190,7 +1193,148 @@ class MedicalImageExplorer:
                                                 plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
-                            
+
+                                    required_subkernel_ids = st.text_input(f"Enter the desired sub-kernel (position number) you want to retain from kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}. The un-selected sub-kernels will be zeroed out. If you want to display multiple sub-kernels, please separate ID values with commas (example: ***3*** or ***1,2,3*** or ***4,8,12*** or ***10-15*** or ***9,16-20*** or ***4-8,16-20*** or ***all*** or ***none***).", 
+                                                            "none") 
+                                    
+                                    # To save some hassle.
+                                    required_subkernel_ids_list = None
+                                    try:
+                                        if required_subkernel_ids == "none":
+                                            pass
+                                        else:
+                                            if required_subkernel_ids.lower() == "all":
+                                                required_subkernel_ids_list = [x for x in range(1,num_subkernels+1)]
+                                                st.write(f"All kernels are selected, and their attributes will be displayed individually below.")  
+                                            elif "-" in required_subkernel_ids and "," in required_subkernel_ids:
+                                                required_subkernel_ids_list = []
+                                                comma_split_list = required_subkernel_ids.split(",")
+                                                for list_val in comma_split_list:
+                                                    if "-" in list_val:
+                                                        hypen_split_list = list_val.split("-")
+                                                        if len(hypen_split_list) == 2:
+                                                            required_subkernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
+                                                        else:
+                                                            st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
+                                                            required_subkernel_ids_list = None
+                                                            break
+                                                    else:
+                                                        required_subkernel_ids_list.append(int(list_val))
+                                                    
+                                            elif "-" in required_subkernel_ids and "," not in required_subkernel_ids:
+                                                required_subkernel_ids_list=[]
+                                                hypen_split_list = required_subkernel_ids.split("-")
+                                                if len(hypen_split_list) == 2:
+                                                    required_subkernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
+                                                else:
+                                                    st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
+                                                    required_subkernel_ids_list = None
+                                                    break
+                                            else:
+                                                required_subkernel_ids_list = [int(x) for x in required_subkernel_ids.split(",")]
+                                                
+                                            if any( x < 1 or x > num_subkernels for x in required_subkernel_ids_list):
+                                                st.write(f"The current value is invalid. Please choose integer values between 1-{num_subkernels}.",)
+                                                required_subkernel_ids_list = None
+                                            else:  
+                                                required_subkernel_ids_list = sorted(set(required_subkernel_ids_list))
+                                                st.write(f"The selected kernel(s) are {required_subkernel_ids_list}, and only they will be retained.")        
+                                    except:
+                                        st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
+                                        required_subkernel_ids_list = None  
+                                        
+                                    if required_subkernel_ids_list is not None and input_image is None:
+                                        st.write(f"Please upload the an input image to visualize the feature maps of the kernels.")
+                                        
+                                    elif required_subkernel_ids_list is not None and input_image is not None:
+                                        original_pw_kernel = network_weights[name_required_weight][kernel_id-1]
+                                        modified_pw_kernel = torch.zeros_like(original_pw_kernel)
+                                        
+                                        for subkernel in required_subkernel_ids_list:
+                                            modified_pw_kernel[subkernel-1] = original_pw_kernel[subkernel-1]
+                                        
+                                        modified_pw_kernel_np = modified_pw_kernel.cpu().numpy().flatten()
+                                        
+                                        layer_name_corresponding_dw_conv = copy(a_layer) # Because I am being pedantic.
+                                        layer_name_corresponding_dw_conv = layer_name_corresponding_dw_conv.replace("dws_conv.1", "dws_conv.0")
+                                        feature_maps_of_corresponding_dw_conv = visualizer.get_feature_maps(input_tensor=input_image_tensor,
+                                                                        layer_name=layer_name_corresponding_dw_conv) 
+                                        
+                                        name_required_bias = str(a_layer +".bias")
+                                        feature_map_of_modified_pw_kernel = torch.nn.functional.conv2d(input=feature_maps_of_corresponding_dw_conv,
+                                                                    weight=modified_pw_kernel.unsqueeze(0),
+                                                                    bias=torch.tensor([network_weights[name_required_bias][kernel_id-1]]))                          
+                                        
+                                        plt.figure(figsize=(10, 5))
+                                        plt.subplot(1, 2, 1)
+                                        plt.plot(modified_pw_kernel_np, linewidth=1.0)
+                                        xticks_step = math.ceil(kernel_pw_plot.shape[0]/16) # Why 16? Because 16 ticks fit in the plot. Deal with it!
+                                        plt.xticks(np.arange(len(modified_pw_kernel_np),step=xticks_step), np.arange(1, len(modified_pw_kernel_np)+1, step=xticks_step))
+                                        plt.grid()  
+                                        plt.title(f"Modified Kernel after sub-kernel selection\n"
+                                            f"Sum = {np.sum(modified_pw_kernel_np):.3f}")
+                                        plt.subplot(1, 2, 2)
+                                        plt.title("Feature map using selected sub-kernel(s)\n"
+                                                    f"Mean = {np.mean(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
+                                        plt.imshow(feature_map_of_modified_pw_kernel[0, 0,:,:], cmap='gray')
+                                        
+                                        st.pyplot(plt.gcf())
+                                        plt.close()    
+                                        
+                                        if apply_norm_and_act and feature_map_of_modified_pw_kernel is not None:
+                                            
+                                            try:
+                                                layer_norm_weight_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.weight"][kernel_id-1]])
+                                                layer_norm_bias_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.bias"][kernel_id-1]])
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel,
+                                                                                                                                weight=layer_norm_weight_after_modified_kernel,
+                                                                                                                                bias=layer_norm_bias_after_modified_kernel)
+                                            except:
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel)
+                                                
+                                            feature_maps_of_actlayer_after_modified_kernel = torch.nn.functional.leaky_relu(input=feature_maps_of_normlayer_after_modified_kernel)
+                                            
+                                            if separate_norm_and_act == "No":   
+                                                
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization and Activation")
+                                                plt.imshow(image_NormAct)
+                                                plt.axis("off")
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization and Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                            elif separate_norm_and_act == "Yes":   
+                                                
+                                                ## Only normalization and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization after convolution")
+                                                plt.imshow(image_Norm)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization\n"
+                                                            f"Mean = {np.mean(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                                ## Only activation and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Activation after Normalization")
+                                                plt.imshow(image_Act)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
                             
                                         
                         st.divider()  # 👈 Draws a horizontal rule                
