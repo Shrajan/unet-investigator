@@ -309,6 +309,7 @@ def plot_filter_3d_plotly(filter_2d):
 
     #st.plotly_chart(fig, use_container_width=True)
     st.plotly_chart(fig)
+    
 
 class AdvancedCNNVisualizer:
     def __init__(self, model):
@@ -440,8 +441,9 @@ class AdvancedCNNVisualizer:
                                   layer_name: str, 
                                   cmap: str = 'viridis', 
                                   normalize: bool = True,
-                                  figsize: Tuple =(12, 12),
-                                  fontsize: int =8) -> Tuple[plt.Figure, dict]:
+                                  figsize: Tuple = (12, 12),
+                                  fontsize: int = 8,
+                                  max_columns: int = 6) -> Tuple[plt.Figure, dict]:
         """
         Advanced kernel visualization with detailed analysis
         
@@ -463,9 +465,9 @@ class AdvancedCNNVisualizer:
         kernels_shape = kernels.shape
         
         n_kernels = kernels_shape[0] * kernels_shape[1]
-        grid_size = int(np.ceil(np.sqrt(n_kernels)))
+        grid_size = int(np.ceil(n_kernels/max_columns))
         
-        fig, axes = plt.subplots(grid_size, grid_size, figsize=figsize)
+        fig, axes = plt.subplots(grid_size, max_columns, figsize=figsize)
         axes = axes.ravel() if grid_size > 1 else [axes]
         
         # Kernel statistics
@@ -827,17 +829,21 @@ class MedicalImageExplorer:
                                      
                                     
                                 else:
-                                    layer_figsize = (12,12)
                                     col1, col2 = st.columns(2)
                             
                                     with col1:
+                                        # For setting the height and width of the plots.
+                                        layer_plot_height = st.slider(f"Plot Height for layer: {layer_mapping_dict[a_layer]}", 1, 100, 60)
+                                        layer_plot_width = st.slider(f"Plot Width for layer: {layer_mapping_dict[a_layer]}", 1, 50, 10)
+                                        layer_figsize = (layer_plot_width, layer_plot_height)
+                                    
+                                    with col2:
                                         # Common colormap selection
                                         cmap_kernels = st.selectbox(
                                             f'Colormap for all kernels of layer: {layer_mapping_dict[a_layer]}', 
                                             ['viridis', 'gray', 'plasma', 'inferno', 'magma', 'cividis', 'jet']
                                         )
-                                    
-                                    with col2:
+                                        
                                         # Plot font size
                                         layer_plot_font = st.slider(f"Font-Size for layer: {layer_mapping_dict[a_layer]}", 1, 25, 12)
 
@@ -1225,23 +1231,61 @@ class MedicalImageExplorer:
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
 
-                                    required_subkernel_ids = st.text_input(f"Enter the desired sub-kernel (position number) you want to retain from kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}. The un-selected sub-kernels will be zeroed out. If you want to display multiple sub-kernels, please separate ID values with commas (example: ***3*** or ***1,2,3*** or ***4,8,12*** or ***10-15*** or ***9,16-20*** or ***4-8,16-20*** or ***all*** or ***none***).", 
-                                                            "none") 
+                                    required_subkernel_ids = st.text_input(f"""Enter the desired sub-kernel (position number) you want to retain from kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}. The un-selected sub-kernels will be zeroed out. \\
+                                                                           If you want to display multiple sub-kernels, please separate ID values with commas (example: ***3*** or ***1,2,3*** or ***4,8,12*** or ***10-15*** or ***9,16-20*** or ***4-8,16-20*** or ***all*** or ***none***). \\
+                                                                           You can also multiply a factor to the choosen sub-kernel ID(s): ***[id(s)\*factor_val]*** (example: ***[3\*0.5]*** or ***[3-10\*0.5]***). Please do not use commas inside the square brackets. \\
+                                                                           You can use use a combination of any of these. (example: ***3,[6\*0.5]*** or ***1,2,3,[8-12\*1.5]*** or ***[all\*0.5]***""", 
+                                                            "none")  
                                     
                                     # To save some hassle.
                                     required_subkernel_ids_list = None
+                                    required_subkernel_ids_dict = {}
                                     try:
                                         if required_subkernel_ids == "none":
                                             pass
                                         else:
+                                            # Remove whitespace
+                                            required_kernel_ids = required_kernel_ids.replace(' ', '')
                                             if required_subkernel_ids.lower() == "all":
                                                 required_subkernel_ids_list = [x for x in range(1,num_subkernels+1)]
                                                 st.write(f"All kernels are selected, and their attributes will be displayed individually below.")  
-                                            elif "-" in required_subkernel_ids and "," in required_subkernel_ids:
+                                            else:
                                                 required_subkernel_ids_list = []
                                                 comma_split_list = required_subkernel_ids.split(",")
                                                 for list_val in comma_split_list:
-                                                    if "-" in list_val:
+                                                    if '[' in list_val and ']' in list_val and '*' in list_val:
+                                                        # Remove brackets
+                                                        list_val = list_val.strip('[]')
+                                                        
+                                                        # Split by multiplicative factor
+                                                        ids_part, val_part = list_val.split('*')
+                                                        
+                                                        # Convert value to int or float
+                                                        try:
+                                                            val = float(val_part)
+                                                        except:
+                                                            st.write(f"Invalid multiplicative factor: {val_part}")
+                                                        
+                                                        # Process ID part
+                                                        if ids_part.lower() == 'all':
+                                                            # All kernels case
+                                                            kernel_ids = range(1, num_layer_kernels + 1)
+                                                        elif '-' in ids_part:
+                                                            # Range case
+                                                            start, end = map(int, ids_part.split('-'))
+                                                            kernel_ids = range(start, end + 1)
+                                                        else:
+                                                            # Single number case
+                                                            kernel_ids = [int(ids_part)]
+                                                        
+                                                        required_subkernel_ids_list+= kernel_ids
+                                                        
+                                                        # Validate and add kernel IDs
+                                                        for i in kernel_ids:
+                                                            if i not in required_subkernel_ids_dict:
+                                                                required_subkernel_ids_dict[i] = val
+                                                        
+                                                    elif "-" in list_val:
                                                         hypen_split_list = list_val.split("-")
                                                         if len(hypen_split_list) == 2:
                                                             required_subkernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
@@ -1251,18 +1295,11 @@ class MedicalImageExplorer:
                                                             break
                                                     else:
                                                         required_subkernel_ids_list.append(int(list_val))
-                                                    
-                                            elif "-" in required_subkernel_ids and "," not in required_subkernel_ids:
-                                                required_subkernel_ids_list=[]
-                                                hypen_split_list = required_subkernel_ids.split("-")
-                                                if len(hypen_split_list) == 2:
-                                                    required_subkernel_ids_list.extend([hypen_val for hypen_val in range(int(hypen_split_list[0]), int(hypen_split_list[1])+1)])
-                                                else:
-                                                    st.write(f"The current value is invalid. Please enter valid kernel ID(s) in integer format and re-try.",)
-                                                    required_subkernel_ids_list = None
-                                                    break
-                                            else:
-                                                required_subkernel_ids_list = [int(x) for x in required_subkernel_ids.split(",")]
+                                                        
+                                            # Final validation and add kernel IDs
+                                            for i in required_subkernel_ids_list:
+                                                if i not in required_subkernel_ids_dict:
+                                                    required_subkernel_ids_dict[i] = 1
                                                 
                                             if any( x < 1 or x > num_subkernels for x in required_subkernel_ids_list):
                                                 st.write(f"The current value is invalid. Please choose integer values between 1-{num_subkernels}.",)
@@ -1282,7 +1319,7 @@ class MedicalImageExplorer:
                                         modified_pw_kernel = torch.zeros_like(original_pw_kernel)
                                         
                                         for subkernel in required_subkernel_ids_list:
-                                            modified_pw_kernel[subkernel-1] = original_pw_kernel[subkernel-1]
+                                            modified_pw_kernel[subkernel-1] = original_pw_kernel[subkernel-1] * required_subkernel_ids_dict[subkernel]
                                         
                                         modified_pw_kernel_np = modified_pw_kernel.cpu().numpy().flatten()
                                         
