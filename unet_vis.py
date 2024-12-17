@@ -10,19 +10,17 @@ import streamlit as st
 import torch, math
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import nibabel as nib
 import pandas as pd
 from typing import List, Optional, Tuple, Union, Dict
 from matplotlib.colors import LinearSegmentedColormap
 from copy import copy
 from PIL import Image
-from matplotlib import cm
-import plotly.graph_objs as go
 
-# Assuming you have these utility functions in separate files
+# Custom functions
 from nnunet_helper import nnUNetHelper
-from preprocessing_utils import preprocess_ct_slice
+from utils_data import load_medical_image
+from utils_plot import plot_filter_3d_plotly
+from utils_misc import get_user_friendly_names
 
 st.set_page_config(
             page_title="U-Net Explorer", 
@@ -40,275 +38,6 @@ st.html(
         </style>
         '''
 )
-
-def get_user_friendly_names(actual_layer_names: List, num_unet_stages: int, nnunet_format: bool =True) -> Dict:
-    layer_name_mapping_dict = {}
-    #print(actual_layer_names)
-    
-    if nnunet_format:
-        num_encoders = num_unet_stages
-        num_decoders = num_unet_stages - 1
-        num_deep_supervision = num_decoders
-        try:
-            for layer_name in actual_layer_names:
-                str_split_list = layer_name.split(".")
-                
-                
-                if 'seg_layers' in layer_name:
-                    if str_split_list[-1] == str(num_deep_supervision-1):
-                        user_friendly_name = "Final Layer - Prediction"
-                    else:
-                        user_friendly_name = f"{str_split_list[0].title()} {num_decoders - int(str_split_list[-1])} - Deep Supervision" 
-                
-                elif "decoder" in layer_name.lower():
-                    if 'dws_conv' in layer_name:
-                        dws_dict = {'0': 'Depth-wise', '1': 'Point-wise'}
-                        user_friendly_name = f"{str_split_list[0].title()} {num_decoders - int(str_split_list[2])} - {dws_dict[str_split_list[-1]]} Convolution {int(str_split_list[-3])+1}" 
-                    else:
-                        user_friendly_name = f"{str_split_list[0].title()} {num_decoders - int(str_split_list[2])} - Normal/Patch Convolution {int(str_split_list[-3])+1}" 
-                    
-                elif "encoder" in layer_name.lower():
-                    if int(str_split_list[2]) == num_encoders -1:
-                        if 'dws_conv' in layer_name:
-                            dws_dict = {'0': 'Depth-wise', '1': 'Point-wise'}
-                            user_friendly_name = f"Middle/Bottleneck - {dws_dict[str_split_list[-1]]} Convolution {int(str_split_list[-3])+1}" 
-                        else:
-                            user_friendly_name = f"Middle/Bottleneck - Normal/Patch Convolution {int(str_split_list[-3])+1}" 
-                    else:
-                        if 'dws_conv' in layer_name:
-                            dws_dict = {'0': 'Depth-wise', '1': 'Point-wise'}
-                            user_friendly_name = f"{str_split_list[0].title()} {int(str_split_list[2])+1} - {dws_dict[str_split_list[-1]]} Convolution {int(str_split_list[-3])+1}" 
-                        else:
-                            user_friendly_name = f"{str_split_list[0].title()} {int(str_split_list[2])+1} - Normal/Patch Convolution {int(str_split_list[-3])+1}" 
-                
-                else:
-                    raise Exception("Could not find a matching prefix name in the U-Net model.")
-                
-                layer_name_mapping_dict[layer_name] = user_friendly_name
-            return layer_name_mapping_dict
-        except:
-            raise Exception("Could not map user friendly names.")
-    else:
-        raise Exception("Only nnUNet framework is supported for now.")
-
-def extract_slice(img_array):
-    """
-    Extract a representative 2D slice from multi-dimensional arrays
-    
-    """
-    # Handle different dimensional inputs
-    if img_array.ndim == 2:
-        return img_array
-    elif img_array.ndim == 3:
-        # Select middle slice
-        slice_selection = img_array.shape[2] // 2
-        return img_array[:, :, slice_selection]
-    elif img_array.ndim == 4:
-        # For multi-channel 3D images, select middle slice of first channel
-        slice_selection = img_array.shape[2] // 2
-        return img_array[:, :, slice_selection, 0]
-    else:
-        raise ValueError(f"Unsupported image dimensions: {img_array.ndim}")
-
-def load_medical_image(uploaded_file: Union[str, np.ndarray, None], 
-                        file_type: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[dict]]:
-    """
-    Comprehensive medical image loader supporting multiple input types
-    
-    Args:
-        uploaded_file: Input image source (file path, numpy array, Streamlit uploaded file)
-        file_type: Optional explicit file type specification
-    
-    Returns:
-        Tuple of (preprocessed_slice, original_slice, metadata)
-    """
-
-    # Default error handling
-    if uploaded_file is None:
-        st.info("""
-        ### 📸 Image Upload Guidance
-        Supported Input Types:
-        - Streamlit file uploader
-        - NumPy array
-        - File path to medical image
-        - Supports 2D/3D/4D arrays
-        - Recommended: Grayscale medical images
-        """)
-        return None, None, None
-
-    try:
-        # Handle different input types
-        if isinstance(uploaded_file, np.ndarray):
-            # Direct NumPy array input
-            original_slice = extract_slice(uploaded_file)
-            metadata = {
-                'input_type': 'numpy_array',
-                'original_shape': uploaded_file.shape,
-                'data_type': str(uploaded_file.dtype)
-            }
-        
-        elif isinstance(uploaded_file, str):
-            # File path input
-            file_extension = uploaded_file.split('.')[-1].lower()
-            
-            if file_extension in ['npy']:
-                # NumPy .npy file
-                original_slice = extract_slice(np.load(uploaded_file))
-                metadata = {
-                    'input_type': 'numpy_file',
-                    'file_path': uploaded_file
-                }
-            
-            elif file_extension in ['nii', 'nii.gz']:
-                # NIfTI file
-                nifti_img = nib.load(uploaded_file)
-                img_array = nifti_img.get_fdata()
-                original_slice = extract_slice(img_array)
-                
-                metadata = {
-                    'input_type': 'nifti_file',
-                    'file_path': uploaded_file,
-                    'original_dimensions': img_array.shape,
-                    'affine_matrix': nifti_img.affine
-                }
-            
-            else:
-                # Other image formats
-                original_slice = plt.imread(uploaded_file)
-                if original_slice.ndim == 3:
-                    original_slice = original_slice[:, :, 0]
-                
-                metadata = {
-                    'input_type': 'image_file',
-                    'file_path': uploaded_file
-                }
-        
-        elif hasattr(uploaded_file, 'read'):
-            # Streamlit uploaded file
-            file_extension = uploaded_file.name.split('.')[-1].lower()
-            
-            if file_extension in ['npy']:
-                # NumPy .npy file from upload
-                original_slice = extract_slice(np.load(uploaded_file))
-                metadata = {
-                    'input_type': 'uploaded_numpy_file',
-                    'filename': uploaded_file.name
-                }
-            
-            elif file_extension in ['nii', 'nii.gz']:
-                # NIfTI file from upload
-                nifti_img = nib.load(uploaded_file)
-                img_array = nifti_img.get_fdata()
-                original_slice = extract_slice(img_array)
-                
-                metadata = {
-                    'input_type': 'uploaded_nifti',
-                    'filename': uploaded_file.name,
-                    'original_dimensions': img_array.shape
-                }
-            
-            else:
-                # Standard image formats
-                original_slice = plt.imread(uploaded_file)
-                if original_slice.ndim == 3:
-                    original_slice = original_slice[:, :, 0]
-                
-                metadata = {
-                    'input_type': 'uploaded_image',
-                    'filename': uploaded_file.name
-                }
-                
-        else:
-            st.error("Unsupported input type")
-            return None, None, None
-        
-        # Ensure slice is float for preprocessing
-        original_slice = original_slice.astype(np.float32)
-        
-        # Add general metadata
-        metadata.update({
-            'slice_shape': original_slice.shape,
-            'min_value': np.min(original_slice),
-            'max_value': np.max(original_slice),
-            'mean_value': np.mean(original_slice),
-            'std_value': np.std(original_slice)
-        })
-        
-        # Preprocessing
-        preprocessed_slice = preprocess_ct_slice(original_slice)
-        
-        return preprocessed_slice, original_slice, metadata
-
-    except Exception as e:
-        st.error(f"Error processing image: {e}")
-        return None, None, None
-
-
-def plot_filter_3d(filter_2d):
-    """
-    Visualize a 2D filter in 3D representation
-    
-    Parameters:
-    filter_2d (numpy.ndarray): 2D filter/kernel to visualize
-    """
-    # Create coordinate grids
-    x = np.arange(filter_2d.shape[1])
-    y = np.arange(filter_2d.shape[0])
-    X, Y = np.meshgrid(x, y)
-    
-    # Create the 3D plot
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    # Surface plot
-    surf = ax.plot_surface(X, Y, filter_2d, 
-                            #cmap=cm.coolwarm,  # Color map 
-                            cmap = "viridis",
-                            linewidth=0, 
-                            antialiased=False)
-    
-    # Customize the plot
-    ax.set_xlabel('X Position')
-    ax.set_ylabel('Y Position')
-    ax.set_zlabel('Filter Value')
-    ax.set_title('3D Visualization of 2D Filter')
-    
-    # Add a color bar
-    fig.colorbar(surf, shrink=0.5, aspect=5)
-    
-    plt.tight_layout()
-    st.pyplot(plt.gcf())
-    plt.close()
-
-def plot_filter_3d_plotly(filter_2d):
-    """
-    Visualize a 2D filter in an interactive 3D Plotly representation
-    Parameters:
-    filter_2d (numpy.ndarray): 2D filter/kernel to visualize
-    """
-    # We need to flip the 2d-filter 
-    filter_2d = np.flip(filter_2d, 1)
-    x = np.arange(filter_2d.shape[1])
-    y = np.arange(filter_2d.shape[0])
-    X, Y = np.meshgrid(x, y)
-
-    # Create Plotly 3D surface plot
-    fig = go.Figure(data=[go.Surface(z=filter_2d, x=X, y=Y, 
-                                     colorscale='Viridis')])
-    
-    fig.update_layout(
-        title='3D Visualization of 2D Filter',
-        scene = dict(
-            xaxis_title='X Position',
-            yaxis_title='Y Position',
-            zaxis_title='Filter Value'
-        ),
-        width=800,
-        height=600
-    )
-
-    #st.plotly_chart(fig, use_container_width=True)
-    st.plotly_chart(fig)
     
 
 class AdvancedCNNVisualizer:
@@ -630,6 +359,11 @@ class MedicalImageExplorer:
         else:
             uploaded_image = None
         
+        flip_options = ["Vertical", "Horizontal"]
+        selectied_flip = st.sidebar.segmented_control(
+            "Flip input image", flip_options, selection_mode="multi"
+        )
+        
         st.sidebar.divider()  # 👈 Draws a horizontal rule
         
         if uploaded_model is None:
@@ -670,13 +404,17 @@ class MedicalImageExplorer:
                 
                 # DONE: Message - model loaded successful.
                 # TODO: Architecture - image of the trained model - Hidden layer or PyTorchViz
-
                 
                 # Process and display image
                 if uploaded_image is not None:
+                    
                     input_image, original_slice, metadata = load_medical_image(uploaded_image)
                     
                     if input_image is not None:
+                        if "Vertical" in selectied_flip:
+                            input_image = np.flip(input_image, axis=0)
+                        if "Horizontal" in selectied_flip:
+                            input_image = np.flip(input_image, axis=1)
                         
                         # Visualization of original image
                         st.markdown("### Feature Maps of the uploaded Image")
@@ -830,11 +568,16 @@ class MedicalImageExplorer:
                                     
                                 else:
                                     col1, col2 = st.columns(2)
+                                    
+                                    max_columns = 6
+                                    max_height = int(np.ceil(num_layer_kernels/max_columns))
+                                    default_height = int(max_height * 2)
+                                    default_width = int(max_columns * 1.5)
                             
                                     with col1:
                                         # For setting the height and width of the plots.
-                                        layer_plot_height = st.slider(f"Plot Height for layer: {layer_mapping_dict[a_layer]}", 1, 100, 60)
-                                        layer_plot_width = st.slider(f"Plot Width for layer: {layer_mapping_dict[a_layer]}", 1, 50, 10)
+                                        layer_plot_height = st.slider(f"Plot Height for layer: {layer_mapping_dict[a_layer]}", 1, max(50, default_height+10), default_height)
+                                        layer_plot_width = st.slider(f"Plot Width for layer: {layer_mapping_dict[a_layer]}", 1, max(50, default_width+10), default_width)
                                         layer_figsize = (layer_plot_width, layer_plot_height)
                                     
                                     with col2:
@@ -860,7 +603,8 @@ class MedicalImageExplorer:
                                         cmap=cmap_kernels, 
                                         normalize=normalize_kernels,
                                         figsize=layer_figsize,
-                                        fontsize=layer_plot_font
+                                        fontsize=layer_plot_font, 
+                                        max_columns=max_columns
                                     )
                                     
                             # Plot the original kernel values.
@@ -1004,7 +748,7 @@ class MedicalImageExplorer:
                                 show_3d_plots = False
                             
                             device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-                            input_image_tensor = torch.from_numpy(input_image).unsqueeze(0).unsqueeze(0).to(device)
+                            input_image_tensor = torch.from_numpy(input_image.copy()).unsqueeze(0).unsqueeze(0).to(device)
                             feature_maps_of_conv_layer = visualizer.get_feature_maps(input_tensor=input_image_tensor,
                                                         layer_name=a_layer)                         
                             
@@ -1053,7 +797,7 @@ class MedicalImageExplorer:
                                 if required_weight_shape[-1] == 1:
                                     kernel_pw_plot = network_weights[name_required_weight][kernel_id-1].cpu().numpy().flatten()                        
                                     plt.plot(kernel_pw_plot, linewidth=1.0)
-                                    xticks_step = math.ceil(kernel_pw_plot.shape[0]/16) # Why 16? Because 16 ticks fit in the plot. Deal with it!
+                                    xticks_step = math.ceil(kernel_pw_plot.shape[0]/16) if kernel_pw_plot.shape[0] < 100 else  math.ceil(kernel_pw_plot.shape[0]/10)      # Why 16 and 10? Because 16 ticks for 2 digits and 10 tickts for 3 digits fit in the plot. Deal with it!
                                     plt.xticks(np.arange(len(kernel_pw_plot),step=xticks_step), np.arange(1, len(kernel_pw_plot)+1, step=xticks_step))  
                                     plt.grid()  
                                     plt.title(f"Original Kernel\n"
