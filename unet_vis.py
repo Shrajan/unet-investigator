@@ -978,7 +978,7 @@ class MedicalImageExplorer:
                                     required_subkernel_ids = st.text_input(f"""Enter the desired sub-kernel (position number) you want to retain from kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}. The un-selected sub-kernels will be zeroed out. \\
                                                                            If you want to display multiple sub-kernels, please separate ID values with commas (example: ***3*** or ***1,2,3*** or ***4,8,12*** or ***10-15*** or ***9,16-20*** or ***4-8,16-20*** or ***all*** or ***none***). \\
                                                                            You can also multiply a factor to the choosen sub-kernel ID(s): ***[id(s)\*factor_val]*** (example: ***[3\*0.5]*** or ***[3-10\*0.5]***). Please do not use commas inside the square brackets. \\
-                                                                           You can use use a combination of any of these. (example: ***3,[6\*0.5]*** or ***1,2,3,[8-12\*1.5]*** or ***[all\*0.5]***""", 
+                                                                           You can use use a combination of any of these (example: ***3,[6\*0.5]*** or ***1,2,3,[8-12\*1.5]*** or ***[all\*0.5]***).""", 
                                                             "none")  
                                     
                                     # To save some hassle.
@@ -1147,7 +1147,115 @@ class MedicalImageExplorer:
                                                 plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
-                            
+                                    # Individual Equal Value Setting controls
+                                    set_equal_this_pw_kernel = st.checkbox(
+                                        f'Set same value for all point-wise weights of kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}', 
+                                        value=False,
+                                        help="Sets the same values of this weights of this point-wise kernel."
+                                    ) 
+                                    
+                                    if set_equal_this_pw_kernel:
+                                        set_equal_value_str_pw_kernel = st.text_input(f"Enter the value to set for all weights for kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]} (example: ***1*** or ***10*** or ***0.5*** or ***-0.99*** or ***1/32***).",
+                                                        "0.0")
+                                        try:
+                                            if "/" in set_equal_value_str_pw_kernel:
+                                                str_split_values = set_equal_value_str_pw_kernel.split("/")
+                                                if len(str_split_values) == 2:
+                                                    set_equal_value_num_pw_kernel = float(str_split_values[0]) / float(str_split_values[1])
+                                                else:
+                                                    st.write(f"The current value is invalid. Please enter a number and re-try, or disable ***equal setting*** for this kernel.",)
+                                                    set_equal_value_num_pw_kernel = 0.0
+                                            else:
+                                                set_equal_value_num_pw_kernel = float(set_equal_value_str_pw_kernel)
+
+                                        except:
+                                            st.write(f"The current value is invalid. Please enter a number and re-try, or disable ***equal setting*** for this kernel.",)
+                                            set_equal_value_num_pw_kernel = 0.0
+                                        
+                                        original_pw_kernel = network_weights[name_required_weight][kernel_id-1]
+                                        modified_pw_kernel = torch.full_like(original_pw_kernel, set_equal_value_num_pw_kernel)
+                                        modified_pw_kernel_np = modified_pw_kernel.cpu().numpy().flatten()
+                                        
+                                        layer_name_corresponding_dw_conv = copy(a_layer) # Because I am being pedantic.
+                                        layer_name_corresponding_dw_conv = layer_name_corresponding_dw_conv.replace("dws_conv.1", "dws_conv.0")
+                                        feature_maps_of_corresponding_dw_conv = visualizer.get_feature_maps(input_tensor=input_image_tensor,
+                                                                        layer_name=layer_name_corresponding_dw_conv) 
+                                        
+                                        name_required_bias = str(a_layer +".bias")
+                                        feature_map_of_modified_pw_kernel = torch.nn.functional.conv2d(input=feature_maps_of_corresponding_dw_conv,
+                                                                    weight=modified_pw_kernel.unsqueeze(0),
+                                                                    bias=torch.tensor([network_weights[name_required_bias][kernel_id-1]]))                          
+                                        
+                                        plt.figure(figsize=(10, 5))
+                                        plt.subplot(1, 2, 1)
+                                        plt.plot(modified_pw_kernel_np, linewidth=1.0)
+                                        xticks_step = math.ceil(kernel_pw_plot.shape[0]/16) # Why 16? Because 16 ticks fit in the plot. Deal with it!
+                                        plt.xticks(np.arange(len(modified_pw_kernel_np),step=xticks_step), np.arange(1, len(modified_pw_kernel_np)+1, step=xticks_step))
+                                        plt.grid()  
+                                        plt.title(f"Modified Kernel after setting equal value = {set_equal_value_num_pw_kernel} \n"
+                                            f"Sum = {np.sum(modified_pw_kernel_np):.3f}")
+                                        plt.subplot(1, 2, 2)
+                                        plt.title("Feature map using modified Kernel\n"
+                                                    f"Mean = {np.mean(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
+                                        plt.imshow(feature_map_of_modified_pw_kernel[0, 0,:,:], cmap='gray')
+                                        
+                                        st.pyplot(plt.gcf())
+                                        plt.close()    
+                                        
+                                        if apply_norm_and_act and feature_map_of_modified_pw_kernel is not None:
+                                            
+                                            try:
+                                                layer_norm_weight_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.weight"][kernel_id-1]])
+                                                layer_norm_bias_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.bias"][kernel_id-1]])
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel,
+                                                                                                                                weight=layer_norm_weight_after_modified_kernel,
+                                                                                                                                bias=layer_norm_bias_after_modified_kernel)
+                                            except:
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel)
+                                                
+                                            feature_maps_of_actlayer_after_modified_kernel = torch.nn.functional.leaky_relu(input=feature_maps_of_normlayer_after_modified_kernel)
+                                            
+                                            if separate_norm_and_act == "No":   
+                                                
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization and Activation")
+                                                plt.imshow(image_NormAct)
+                                                plt.axis("off")
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization and Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                            elif separate_norm_and_act == "Yes":   
+                                                
+                                                ## Only normalization and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization after convolution")
+                                                plt.imshow(image_Norm)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization\n"
+                                                            f"Mean = {np.mean(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                                ## Only activation and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Activation after Normalization")
+                                                plt.imshow(image_Act)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
                                         
                         st.divider()  # 👈 Draws a horizontal rule                
 

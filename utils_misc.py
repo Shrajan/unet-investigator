@@ -1,4 +1,5 @@
 from typing import List, Dict, Tuple
+import warnings
 
 def get_user_friendly_names(actual_layer_names: List, num_unet_stages: int, nnunet_format: bool =True) -> Dict:
     layer_name_mapping_dict = {}
@@ -46,6 +47,9 @@ def get_user_friendly_names(actual_layer_names: List, num_unet_stages: int, nnun
                 layer_name_mapping_dict[layer_name] = user_friendly_name
             return layer_name_mapping_dict
         except:
-            raise Exception("Could not map user friendly names.")
+            warnings.warn("Could not map user friendly names. So we will use the original layer names.")
+            for layer_name in actual_layer_names:
+                layer_name_mapping_dict[layer_name] = layer_name
+            return layer_name_mapping_dict
     else:
         raise Exception("Only nnUNet framework is supported for now.")

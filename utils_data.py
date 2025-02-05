@@ -29,7 +29,10 @@ def extract_slice(img_array):
     elif img_array.ndim == 4:
         # For multi-channel 3D images, select middle slice of first channel
         slice_selection = img_array.shape[2] // 2
-        return img_array[:, :, slice_selection, 0]
+        required_slice = img_array[0, 49, :, :]
+        required_slice = np.pad(required_slice, (1, 1), 'constant', constant_values=(0, 0))
+        #print("Input shape:", required_slice.shape)
+        return required_slice
     else:
         raise ValueError(f"Unsupported image dimensions: {img_array.ndim}")
 
