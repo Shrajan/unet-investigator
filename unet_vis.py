@@ -430,6 +430,7 @@ class MedicalImageExplorer:
                         plt.imshow(nnUNetHelper.predict_on_2d(network=network, input_array=input_image), 
                                    cmap=cmap_prediction)
                         st.pyplot(plt.gcf())
+                        plt.close()
                         st.divider()  # 👈 Draws a horizontal rule
                 else:
                     input_image = None
@@ -1256,7 +1257,36 @@ class MedicalImageExplorer:
                                                 plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
-                                        
+                        
+                        if required_weight_shape[-1] != 1 and input_image is not None: 
+                            
+                            st.write(" . "*98) # Found this value using trial and error for my machine - it is not dynamic because for some reason streamlit does not give page width. And I was lazy to search further.
+                            
+                            # Sum up all feature maps of this layer, divide by number of feature maps and display the resultant.
+                            # Display all kernels controls
+                            display_average_feature_maps = st.checkbox(
+                                f'Display :orange[combined feature maps] of layer: {layer_mapping_dict[a_layer]}', 
+                                value=False,
+                                help="Creates a new feature map, that is sum of all N image maps, and then divided by N."
+                            )
+                            
+                            if display_average_feature_maps:
+                                device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+                                input_image_tensor = torch.from_numpy(input_image.copy()).unsqueeze(0).unsqueeze(0).to(device)
+                                feature_maps_of_conv_layer = visualizer.get_feature_maps(input_tensor=input_image_tensor,
+                                                            layer_name=a_layer)     
+                                combined_feature_maps = torch.sum(feature_maps_of_conv_layer[0], axis=0) / feature_maps_of_conv_layer.shape[1]
+                                
+                                plt.figure(figsize=(10,5))
+                                plt.subplot(1, 2, 1)
+                                plt.title("Original Input Image")
+                                plt.imshow(input_image, cmap='gray')
+                                plt.subplot(1, 2, 2)
+                                plt.title("Combined Feature Maps")
+                                plt.imshow(combined_feature_maps , cmap='gray')
+                                st.pyplot(plt.gcf())
+                                plt.close()
+                                
                         st.divider()  # 👈 Draws a horizontal rule                
 
 def main():
