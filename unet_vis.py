@@ -7,7 +7,7 @@
 # DO THIS AT YOUR OWN PERIL. 
 
 import streamlit as st
-import torch, math
+import torch, math, ast
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -119,11 +119,22 @@ class AdvancedCNNVisualizer:
         fig, axes = plt.subplots(grid_size, num_columns, figsize=figsize)
         axes = axes.ravel() if grid_size > 1 else [axes]
         
+        # Count frequencies
+        max_indices = np.argmax(np.abs(kernels), axis=1)
+        frequency_unsorted_dict = {}
+        for idx in max_indices:
+            if idx.item()+1 in frequency_unsorted_dict:
+                frequency_unsorted_dict[idx.item()+1] += 1
+            else:
+                frequency_unsorted_dict[idx.item()+1] = 1
+        frequency_sorted_dict = dict(sorted(frequency_unsorted_dict.items())) 
+        
         # Kernel statistics
         kernel_stats = {
             'total_kernels': n_kernels,
             'kernel_shape': kernels.shape[1:],
-            'kernel_details': []
+            'kernel_details': [],
+            'frequency_max_index': frequency_sorted_dict
         }
         
         for i in range(kernels_shape[0]):
@@ -519,7 +530,7 @@ class MedicalImageExplorer:
                                     
                                     with col1:
                                         # For setting the height and width of the plots.
-                                        layer_plot_height = st.slider(f"Plot Height for layer: {layer_mapping_dict[a_layer]}", 1, 100, 60)
+                                        layer_plot_height = st.slider(f"Plot Height for layer: {layer_mapping_dict[a_layer]}", 1, int(num_layer_kernels*4), int(num_layer_kernels*2.5))
                                         layer_plot_width = st.slider(f"Plot Width for layer: {layer_mapping_dict[a_layer]}", 1, 50, 10)
                                         layer_figsize = (layer_plot_width, layer_plot_height)
                                         
@@ -545,7 +556,7 @@ class MedicalImageExplorer:
                                         )
                                         
                                         xticks_step_full_plot_str = st.text_input(f"Enter the number (positive integer) of steps between x-ticks for {layer_mapping_dict[a_layer]}.", 
-                                                            "1")
+                                                            "2")
                                         
                                         try:
                                             xticks_step_full_plot_int = int(xticks_step_full_plot_str)
@@ -620,6 +631,9 @@ class MedicalImageExplorer:
                                     # Detailed kernel stats
                                     stats_df = pd.DataFrame(kernel_stats['kernel_details'])
                                     st.dataframe(stats_df, hide_index=True)
+                                    
+                                    if required_weight_shape[-1] == 1:
+                                        st.write(f"Frequency of index with maximum absolute value: {kernel_stats['frequency_max_index']}")
                             
                                 if threshold_all_plots:
                                     st.write(" . "*98) # Found this value using trial and error for my machine - it is not dynamic because for some reason streamlit does not give page width. And I was lazy to search further.
@@ -1148,7 +1162,8 @@ class MedicalImageExplorer:
                                                 plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
                                                 st.pyplot(plt.gcf())
                                                 plt.close()
-                                    # Individual Equal Value Setting controls
+                                    
+                                    # All Weights Equal Value Setting controls
                                     set_equal_this_pw_kernel = st.checkbox(
                                         f'Set same value for all point-wise weights of kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}', 
                                         value=False,
@@ -1156,18 +1171,18 @@ class MedicalImageExplorer:
                                     ) 
                                     
                                     if set_equal_this_pw_kernel:
-                                        set_equal_value_str_pw_kernel = st.text_input(f"Enter the value to set for all weights for kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]} (example: ***1*** or ***10*** or ***0.5*** or ***-0.99*** or ***1/32***).",
+                                        set_individual_value_str_pw_kernel = st.text_input(f"Enter the value to set for all weights for kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]} (example: ***1*** or ***10*** or ***0.5*** or ***-0.99*** or ***1/32***).",
                                                         "0.0")
                                         try:
-                                            if "/" in set_equal_value_str_pw_kernel:
-                                                str_split_values = set_equal_value_str_pw_kernel.split("/")
+                                            if "/" in set_individual_value_str_pw_kernel:
+                                                str_split_values = set_individual_value_str_pw_kernel.split("/")
                                                 if len(str_split_values) == 2:
                                                     set_equal_value_num_pw_kernel = float(str_split_values[0]) / float(str_split_values[1])
                                                 else:
                                                     st.write(f"The current value is invalid. Please enter a number and re-try, or disable ***equal setting*** for this kernel.",)
                                                     set_equal_value_num_pw_kernel = 0.0
                                             else:
-                                                set_equal_value_num_pw_kernel = float(set_equal_value_str_pw_kernel)
+                                                set_equal_value_num_pw_kernel = float(set_individual_value_str_pw_kernel)
 
                                         except:
                                             st.write(f"The current value is invalid. Please enter a number and re-try, or disable ***equal setting*** for this kernel.",)
@@ -1194,6 +1209,117 @@ class MedicalImageExplorer:
                                         plt.xticks(np.arange(len(modified_pw_kernel_np),step=xticks_step), np.arange(1, len(modified_pw_kernel_np)+1, step=xticks_step))
                                         plt.grid()  
                                         plt.title(f"Modified Kernel after setting equal value = {set_equal_value_num_pw_kernel} \n"
+                                            f"Sum = {np.sum(modified_pw_kernel_np):.3f}")
+                                        plt.subplot(1, 2, 2)
+                                        plt.title("Feature map using modified Kernel\n"
+                                                    f"Mean = {np.mean(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_map_of_modified_pw_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
+                                        plt.imshow(feature_map_of_modified_pw_kernel[0, 0,:,:], cmap='gray')
+                                        
+                                        st.pyplot(plt.gcf())
+                                        plt.close()    
+                                        
+                                        if apply_norm_and_act and feature_map_of_modified_pw_kernel is not None:
+                                            
+                                            try:
+                                                layer_norm_weight_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.weight"][kernel_id-1]])
+                                                layer_norm_bias_after_modified_kernel = torch.tensor([network_weights[f"{layer_name_norm}.bias"][kernel_id-1]])
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel,
+                                                                                                                                weight=layer_norm_weight_after_modified_kernel,
+                                                                                                                                bias=layer_norm_bias_after_modified_kernel)
+                                            except:
+                                                feature_maps_of_normlayer_after_modified_kernel = torch.nn.functional.instance_norm(input=feature_map_of_modified_pw_kernel)
+                                                
+                                            feature_maps_of_actlayer_after_modified_kernel = torch.nn.functional.leaky_relu(input=feature_maps_of_normlayer_after_modified_kernel)
+                                            
+                                            if separate_norm_and_act == "No":   
+                                                
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization and Activation")
+                                                plt.imshow(image_NormAct)
+                                                plt.axis("off")
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization and Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                            elif separate_norm_and_act == "Yes":   
+                                                
+                                                ## Only normalization and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Normalization after convolution")
+                                                plt.imshow(image_Norm)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Normalization\n"
+                                                            f"Mean = {np.mean(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_normlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                                ## Only activation and its feature maps.
+                                                plt.figure(figsize=(10, 5))
+                                                plt.subplot(1, 2, 1)
+                                                plt.title("Activation after Normalization")
+                                                plt.imshow(image_Act)
+                                                plt.axis("off") 
+                                                plt.subplot(1, 2, 2)
+                                                plt.title("Feature map after applying Activation\n"
+                                                            f"Mean = {np.mean(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].detach().cpu().numpy()):.3f}, Median = {np.median(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:].item().detach().cpu().numpy()):.3f}")
+                                                plt.imshow(feature_maps_of_actlayer_after_modified_kernel[0, 0,:,:], cmap='gray')
+                                                st.pyplot(plt.gcf())
+                                                plt.close()
+                                                
+                                    # Set individual weight Value Setting controls
+                                    set_individual_weight_this_pw_kernel = st.checkbox(
+                                        f'Position-wise modification individual point-wise weights of kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}', 
+                                        value=False,
+                                        help="You can modify all weights of this point-wise kernel."
+                                    ) 
+                                    
+                                    if set_individual_weight_this_pw_kernel:
+                                        original_pw_kernel = network_weights[name_required_weight][kernel_id-1]
+                                        original_pw_kernel_numpy = original_pw_kernel.cpu().numpy().flatten()
+                                        
+                                        original_pw_kernel_dict = {}
+                                        for array_idx in range(original_pw_kernel_numpy.shape[0]):
+                                            original_pw_kernel_dict[array_idx+1] = original_pw_kernel_numpy[array_idx]
+                                        
+                                        set_individual_value_str_pw_kernel = st.text_input(f"Enter the individual value of all weights for kernel :green[#{kernel_id}] of layer {layer_mapping_dict[a_layer]}. The original kernel position and corresponding weights are: {original_pw_kernel_dict}.",
+                                                        original_pw_kernel_dict)
+                                        try:
+                                            modified_pw_kernel_dict = ast.literal_eval(set_individual_value_str_pw_kernel)
+                                            
+                                            modified_pw_kernel = torch.zeros_like(original_pw_kernel)
+                                            for weight_position in range(required_weight_shape[1]):
+                                                modified_pw_kernel[weight_position,:,:] =  modified_pw_kernel_dict[weight_position+1]
+                                        except:
+                                            st.write(f"The current value is invalid. Please enter a values in the correct format and re-try, or disable ***individual weight setting*** for this kernel.",)
+                                            set_equal_value_num_pw_kernel = 0.0
+                                            modified_pw_kernel = original_pw_kernel
+                                        
+                                        modified_pw_kernel_np = modified_pw_kernel.cpu().numpy().flatten()
+                                        
+                                        layer_name_corresponding_dw_conv = copy(a_layer) # Because I am being pedantic.
+                                        layer_name_corresponding_dw_conv = layer_name_corresponding_dw_conv.replace("dws_conv.1", "dws_conv.0")
+                                        feature_maps_of_corresponding_dw_conv = visualizer.get_feature_maps(input_tensor=input_image_tensor,
+                                                                        layer_name=layer_name_corresponding_dw_conv) 
+                                        
+                                        name_required_bias = str(a_layer +".bias")
+                                        feature_map_of_modified_pw_kernel = torch.nn.functional.conv2d(input=feature_maps_of_corresponding_dw_conv,
+                                                                    weight=modified_pw_kernel.unsqueeze(0),
+                                                                    bias=torch.tensor([network_weights[name_required_bias][kernel_id-1]]))                          
+                                        
+                                        plt.figure(figsize=(10, 5))
+                                        plt.subplot(1, 2, 1)
+                                        plt.plot(modified_pw_kernel_np, linewidth=1.0)
+                                        xticks_step = math.ceil(kernel_pw_plot.shape[0]/16) # Why 16? Because 16 ticks fit in the plot. Deal with it!
+                                        plt.xticks(np.arange(len(modified_pw_kernel_np),step=xticks_step), np.arange(1, len(modified_pw_kernel_np)+1, step=xticks_step))
+                                        plt.grid()  
+                                        plt.title(f"Modified Kernel after setting individual weights\n"
                                             f"Sum = {np.sum(modified_pw_kernel_np):.3f}")
                                         plt.subplot(1, 2, 2)
                                         plt.title("Feature map using modified Kernel\n"
